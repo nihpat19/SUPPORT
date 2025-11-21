@@ -1,3 +1,5 @@
+import sys
+sys.path.append('../../../SUPPORT')
 import skimage.io as skio
 import numpy as np
 import torch
@@ -5,7 +7,7 @@ import zarr
 
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from src.utils.util import get_coordinate
+from SUPPORT.src.utils.util import get_coordinate
 
 
 def random_transform(input, target, rng, is_rotate=True):
@@ -300,7 +302,7 @@ def gen_train_dataloader(patch_size, patch_interval, batch_size, noisy_data_list
             noisy_images_train.append(noisy_image)
 
     dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size,\
-        patch_interval=patch_interval, transform=None if patch_size[1]>=128 or patch_size[2]>=128 else random_transform, random_patch=True, load_to_memory=not is_zarr)
+        patch_interval=patch_interval, transform=None, random_patch=True, load_to_memory=not is_zarr)
     dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=opt.n_cpu, pin_memory=True, prefetch_factor=opt.prefetch_factor)
     
     return dataloader_train
@@ -333,9 +335,9 @@ def gen_train_dataloader_nnfabrik(patch_size, patch_interval, batch_size, noisy_
             print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
             noisy_images_train.append(noisy_image)
 
-    dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size, \
+    dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size,
                                    patch_interval=patch_interval,
-                                   transform=None if patch_size[1] >= 128 or patch_size[2] >= 128 else random_transform,
+                                   transform=None,
                                    random_patch=True, load_to_memory=not is_zarr)
     dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True,
                                   prefetch_factor=2)
@@ -348,8 +350,9 @@ def get_nnfabrik_training_dataset(seed: int, **config):
     patch_interval = config.get("patch_interval", [1,64,64])
     batch_size = config.get("batch_size", 64)
     dataset_paths = config.get("datasets")
+    is_zarr = config.get("is_zarr", False)
     return {
-        "train" : gen_train_dataloader_nnfabrik(patch_size,patch_interval,batch_size,dataset_paths)
+        "train" : gen_train_dataloader_nnfabrik(patch_size,patch_interval,batch_size,dataset_paths,is_zarr)
     }
 
 
