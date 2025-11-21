@@ -1,7 +1,9 @@
+import sys
+sys.path.append('../SUPPORT')
 import torch
 import torch.nn as nn
 
-from model.convhole import ConvHole2D
+from SUPPORT.model.convhole import ConvHole2D
 from typing import Dict
 class SUPPORT(nn.Module):
     """
@@ -337,7 +339,9 @@ class SUPPORT(nn.Module):
         
         return x
 
-def support_model_fn(seed: int, **config) -> torch.nn.Module:
+def support_model_fn(dataloaders: Dict, seed: int, **config) -> torch.nn.Module:
+    #first_input, first_output = next(iter(dataloaders["train"]))
+    #n_dim = np.prod(first_input.shape[1:])
     torch.manual_seed(seed)
     model = SUPPORT(in_channels=61,mid_channels=config.get("unet_channels", [64, 128, 256, 512, 1024]),
                     depth=5,blind_conv_channels=64,one_by_one_channels=[32,16],last_layer_channels=[64,32,16],
