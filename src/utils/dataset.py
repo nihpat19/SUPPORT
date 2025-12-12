@@ -372,11 +372,17 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
         motion_correction_params = (reso.MotionCorrection & key).fetch1()
         field = motion_correction_params['field']
-        noisy_image = noisy_image[field-1,:,:,channel-1,:]
+
+        noisy_image_medianidx = int(noisy_image.shape[-1] // 2) - 1
+        median_slice_indices = np.arange(noisy_image_medianidx - 500, noisy_image_medianidx + 500, 1)
+        noisy_image = noisy_image[field-1,:,:,channel-1,median_slice_indices]
         if raster_correction_params['raster_phase']>1e-7:
             noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
                                                                        temporal_fill_fraction=fill_fraction)
-        noisy_image = galvo_corrections.correct_motion(noisy_image,motion_correction_params['x_shifts'],motion_correction_params['y_shifts'])
+
+        median_slice_xshifts = motion_correction_params['x_shifts'][median_slice_indices]
+        median_slice_yshifts = motion_correction_params['y_shifts'][median_slice_indices]
+        noisy_image = galvo_corrections.correct_motion(noisy_image,median_slice_xshifts,median_slice_yshifts)
         noisy_image = noisy_image.transpose(2, 0, 1)
         noisy_image = torch.from_numpy(noisy_image).type(torch.FloatTensor)
         print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
