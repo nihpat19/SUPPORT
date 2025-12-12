@@ -12,7 +12,7 @@ from pipeline.utils import galvo_corrections
 import tifffile
 import pipeline.experiment as experiment
 import pipeline.reso as reso
-
+import scanreader
 def random_transform(input, target, rng, is_rotate=True):
     """
     Randomly rotate/flip the image
@@ -365,19 +365,24 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         #if not is_zarr:
         noisy_scan = experiment.Scan & key
         noisy_data = noisy_scan.local_filenames_as_wildcard
-        noisy_image = tifffile.imread(noisy_data).astype(np.float32)
+        noisy_image = scanreader.read_scan(noisy_data)
+        channel = (reso.CorrectionChannel & key).fetch1('channel')
+
         raster_correction_params = (reso.RasterCorrection & key).fetch1()
         fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
         motion_correction_params = (reso.MotionCorrection & key).fetch1()
+        field = motion_correction_params['field']
+        noisy_image = noisy_image[field,:,:,channel,:]
         if raster_correction_params['raster_phase']>1e-7:
             noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
                                                                        temporal_fill_fraction=fill_fraction)
         noisy_image = galvo_corrections.correct_motion(noisy_image,motion_correction_params['x_shifts'],motion_correction_params['y_shifts'])
-
+        noisy_image = noisy_image.transpose(2, 0, 1)
         noisy_image = torch.from_numpy(noisy_image).type(torch.FloatTensor)
         print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
         if len(noisy_image.shape) == 2:
             noisy_image = noisy_image.unsqueeze(0)
+
         T, _, _ = noisy_image.shape
         noisy_images_train.append(noisy_image)
         # else:
