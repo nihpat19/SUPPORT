@@ -8,7 +8,10 @@ import zarr
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from SUPPORT.src.utils.util import get_coordinate
-
+from pipeline.utils import galvo_corrections
+import tifffile
+import pipeline.experiment as experiment
+import pipeline.reso as reso
 
 def random_transform(input, target, rng, is_rotate=True):
     """
@@ -341,6 +344,53 @@ def gen_train_dataloader_nnfabrik(patch_size, patch_interval, batch_size, noisy_
                                    random_patch=True, load_to_memory=not is_zarr)
     dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True,
                                   prefetch_factor=2)
+
+    return dataloader_train
+
+def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_data_keys):
+    """
+    Generate dataloader for training
+
+    Arguments:
+        patch_size: opt.patch_size
+        patch_interval: opt.patch_interval
+        noisy_data_keys: opt.noisy_data
+
+    Returns:
+        dataloader_train
+    """
+    noisy_images_train = []
+
+    for key in noisy_data_keys:
+        #if not is_zarr:
+        noisy_scan = experiment.Scan & key
+        noisy_data = noisy_scan.local_filenames_as_wildcard
+        noisy_image = tifffile.imread(noisy_data).astype(np.float32)
+        raster_correction_params = (reso.RasterCorrection & key).fetch1()
+        fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
+        motion_correction_params = (reso.MotionCorrection & key).fetch1()
+        if raster_correction_params['raster_phase']>1e-7:
+            noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
+                                                                       temporal_fill_fraction=fill_fraction)
+        noisy_image = galvo_corrections.correct_motion(noisy_image,motion_correction_params['x_shifts'],motion_correction_params['y_shifts'])
+
+        noisy_image = torch.from_numpy(noisy_image).type(torch.FloatTensor)
+        print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
+        if len(noisy_image.shape) == 2:
+            noisy_image = noisy_image.unsqueeze(0)
+        T, _, _ = noisy_image.shape
+        noisy_images_train.append(noisy_image)
+        # else:
+        #     noisy_image = zarr.open(noisy_data, mode='r')
+        #     print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
+        #     noisy_images_train.append(noisy_image)
+
+    dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size, \
+                                   patch_interval=patch_interval,
+                                   transform=None if patch_size[1] >= 128 or patch_size[2] >= 128 else random_transform,
+                                   random_patch=True, load_to_memory=False)
+    dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8,
+                                  pin_memory=True, prefetch_factor=2)
 
     return dataloader_train
 
