@@ -372,7 +372,7 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
         motion_correction_params = (reso.MotionCorrection & key).fetch1()
         field = motion_correction_params['field']
-        noisy_image = noisy_image[field,:,:,channel,:]
+        noisy_image = noisy_image[field-1,:,:,channel-1,:]
         if raster_correction_params['raster_phase']>1e-7:
             noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
                                                                        temporal_fill_fraction=fill_fraction)
