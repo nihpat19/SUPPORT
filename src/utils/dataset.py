@@ -1,5 +1,3 @@
-import sys
-sys.path.append('../../../SUPPORT')
 import skimage.io as skio
 import numpy as np
 import torch
@@ -8,11 +6,11 @@ import zarr
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from SUPPORT.src.utils.util import get_coordinate
-from pipeline.utils import galvo_corrections
-import tifffile
-import pipeline.experiment as experiment
-import pipeline.reso as reso
-import scanreader
+# from pipeline.utils import galvo_corrections
+# import tifffile
+# import pipeline.experiment as experiment
+# import pipeline.reso as reso
+# import scanreader
 def random_transform(input, target, rng, is_rotate=True):
     """
     Randomly rotate/flip the image

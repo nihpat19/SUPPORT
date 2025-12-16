@@ -8,7 +8,7 @@ dj.config['database.user'] = os.environ['DJ_USER']
 dj.config['database.password'] = os.environ['DJ_PASS']
 dj.config['stores']['minio'] = {
     'protocol': 'file',
-    'location': '/mnt/jr-storage.ad.bcm.edu/jr-scratch03A/Nihil/trainedModels/'
+    'location': '//jr-storage.ad.bcm.edu/jr-scratch03A/Nihil/trainedModels/'
 }
 
 model_schema_name = "nihil_nnfabrik_support_optuna"
