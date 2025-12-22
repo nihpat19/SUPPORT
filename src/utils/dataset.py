@@ -8,7 +8,7 @@ from torch.utils.data import Dataset, DataLoader
 try:
     from SUPPORT.src.utils.util import get_coordinate
 except ModuleNotFoundError:
-    from util import get_coordinate
+    from src.utils.util import get_coordinate
 import pipeline
 from pipeline.utils import galvo_corrections
 import tifffile
