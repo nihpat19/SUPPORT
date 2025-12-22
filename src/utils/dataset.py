@@ -2,15 +2,17 @@ import skimage.io as skio
 import numpy as np
 import torch
 import zarr
-
+import pdb
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
 from SUPPORT.src.utils.util import get_coordinate
-# from pipeline.utils import galvo_corrections
-# import tifffile
-# import pipeline.experiment as experiment
-# import pipeline.reso as reso
-# import scanreader
+import pipeline
+from pipeline.utils import galvo_corrections
+import tifffile
+import pipeline.experiment as experiment
+import pipeline.reso as reso
+import scanreader
+import json
 def random_transform(input, target, rng, is_rotate=True):
     """
     Randomly rotate/flip the image
@@ -345,7 +347,7 @@ def gen_train_dataloader_nnfabrik(patch_size, patch_interval, batch_size, noisy_
 
     return dataloader_train
 
-def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_data_keys):
+def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_data_keys, is_zarr=False):
     """
     Generate dataloader for training
 
@@ -372,8 +374,8 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         field = motion_correction_params['field']
 
         noisy_image_medianidx = int(noisy_image.shape[-1] // 2) - 1
-        median_slice_indices = np.arange(noisy_image_medianidx - 500, noisy_image_medianidx + 500, 1)
-        noisy_image = noisy_image[field-1,:,:,channel-1,median_slice_indices]
+        median_slice_indices = np.arange(noisy_image_medianidx - 1000, noisy_image_medianidx + 1000, 1)
+        noisy_image = noisy_image[field-1,:,:,channel-1,median_slice_indices].astype(np.float32)
         if raster_correction_params['raster_phase']>1e-7:
             noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
                                                                        temporal_fill_fraction=fill_fraction)
@@ -396,22 +398,86 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
 
     dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size, \
                                    patch_interval=patch_interval,
-                                   transform=None if patch_size[1] >= 128 or patch_size[2] >= 128 else random_transform,
-                                   random_patch=True, load_to_memory=False)
+                                   transform=None,
+                                   random_patch=True, load_to_memory=not is_zarr)
+    dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8,
+                                  pin_memory=True, prefetch_factor=2)
+
+    return dataloader_train
+
+
+
+def gen_train_dataloader_nnfabrik_pipeline_local(patch_size, patch_interval, batch_size, noisy_datapath, image_window_length, is_zarr=False):
+    """
+    Generate dataloader for training
+
+    Arguments:
+        patch_size: opt.patch_size
+        patch_interval: opt.patch_interval
+        noisy_data_keys: opt.noisy_data
+
+    Returns:
+        dataloader_train
+    """
+    with open(noisy_datapath,'r') as f:
+        noisy_data_keys = json.load(f)
+    noisy_images_train = []
+
+    for key in tqdm(noisy_data_keys):
+        #if not is_zarr:
+        noisy_scan = experiment.Scan & key
+        noisy_data = noisy_scan.local_filenames_as_wildcard
+        noisy_image = scanreader.read_scan(noisy_data)
+        channel = (reso.CorrectionChannel & key).fetch1('channel')
+
+        raster_correction_params = (reso.RasterCorrection & key).fetch1()
+        fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
+        motion_correction_params = (reso.MotionCorrection & key).fetch1()
+        field = motion_correction_params['field']
+
+        noisy_image_medianidx = int(noisy_image.shape[-1] // 2) - 1
+        median_slice_indices = np.arange(noisy_image_medianidx - image_window_length, noisy_image_medianidx + image_window_length, 1)
+        noisy_image = noisy_image[field-1,:,:,channel-1,median_slice_indices].astype(np.float32)
+        if raster_correction_params['raster_phase']>1e-7:
+            noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
+                                                                       temporal_fill_fraction=fill_fraction)
+
+        median_slice_xshifts = motion_correction_params['x_shifts'][median_slice_indices]
+        median_slice_yshifts = motion_correction_params['y_shifts'][median_slice_indices]
+        noisy_image = galvo_corrections.correct_motion(noisy_image,median_slice_xshifts,median_slice_yshifts)
+        noisy_image = noisy_image.transpose(2, 0, 1)
+        noisy_image = torch.from_numpy(noisy_image).type(torch.FloatTensor)
+        print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
+        if len(noisy_image.shape) == 2:
+            noisy_image = noisy_image.unsqueeze(0)
+
+        T, _, _ = noisy_image.shape
+        noisy_images_train.append(noisy_image)
+        # else:
+        #     noisy_image = zarr.open(noisy_data, mode='r')
+        #     print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
+        #     noisy_images_train.append(noisy_image)
+
+    dataset_train = DatasetSUPPORT(noisy_images_train, patch_size=patch_size, \
+                                   patch_interval=patch_interval,
+                                   transform=None,
+                                   random_patch=True, load_to_memory=not is_zarr)
     dataloader_train = DataLoader(dataset_train, batch_size=batch_size, shuffle=True, num_workers=8,
                                   pin_memory=True, prefetch_factor=2)
 
     return dataloader_train
 
 def get_nnfabrik_training_dataset(seed: int, **config):
+    print(config)
     np.random.seed(seed)
     patch_size = config.get("patch_size", [61, 128, 128])
     patch_interval = config.get("patch_interval", [1,64,64])
     batch_size = config.get("batch_size", 64)
     dataset_paths = config.get("datasets")
     is_zarr = config.get("is_zarr", False)
+    window_length = config.get("window_length",500)
     return {
-        "train" : gen_train_dataloader_nnfabrik(patch_size,patch_interval,batch_size,dataset_paths,is_zarr)
+        "train" : gen_train_dataloader_nnfabrik_pipeline_local(patch_size,patch_interval,batch_size,dataset_paths,window_length, is_zarr)
     }
 
 

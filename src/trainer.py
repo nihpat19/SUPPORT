@@ -1,5 +1,8 @@
-from typing import Dict, Tuple, Callable, List, Any
+from typing import Dict, Tuple, Callable, List, Any, Optional
 import sys
+
+from GUI.train_GUI import modelThread
+
 sys.path.append("..")
 import os
 import random
@@ -54,6 +57,8 @@ class SUPPORTTrainer:
         return loss_sum.item(), l1_loss.item(), l2_loss.item()
 
     def train(self) -> Tuple[float,Tuple[List[float], List[float], List[float]], Dict]:
+        if hasattr(tqdm,"_instances"):
+            tqdm._instances.clear()
         epoch_loss_list = []
         epoch_l1_loss_list = []
         epoch_l2_loss_list = []
@@ -98,5 +103,108 @@ class SUPPORTTrainer:
 def SUPPORT_trainer_fn(model: nn.Module,dataloaders: Dict, seed: int, uid: Dict, cb: Callable, **config) \
         -> Tuple[float,Any,Dict]:
     trainer = SUPPORTTrainer(model,dataloaders,seed,config)
+    out = trainer.train()
+    return out
+
+
+
+class SUPPORTChkptTrainer(SUPPORTTrainer):
+    def __init__(self,
+                 model: nn.Module,
+                 dataloaders: Dict,
+                 seed: int,
+                 uid: Dict,
+                 config: Dict,
+                 callback: Callable,
+                 chkpt_options: Optional[Dict] = None):
+        super(SUPPORTTrainer, self).__init__(model, dataloaders,seed,config)
+        self.trained_model_cb = callback
+        self.uid = uid
+        self.losses = []
+        self.chkpt_options = chkpt_options if chkpt_options is not None else {}
+
+    def save(self, epoch: int, score: float) -> None:
+        state = {
+            "action": "save",
+            "score": score,
+            "minimize_score": True,
+            "tracker": self.losses,
+            "optimizer": self.optimizer,
+            **self.chkpt_options,
+        }
+        self.trained_model_cb(uid=self.uid,
+                              epoch=epoch,
+                              model=self.model,
+                              state=state
+                              )
+
+    def restore(self) -> int:
+        loaded_state = {
+            "action": "last",
+            "minimize_score": True,
+            "tracker": self.losses,
+            "optimizer": self.optimizer.state_dict(),
+        }
+        self.trained_model_cb(uid=self.uid, epoch=-1, model=self.model, state=loaded_state)
+        epoch = loaded_state.get("epoch",-1)+1
+        return epoch
+
+    def train(self) -> Tuple[float,Tuple[List[float], List[float], List[float]], Dict]:
+        if hasattr(tqdm,"_instances"):
+            tqdm._instances.clear()
+
+        torch.manual_seed(self.seed)
+        start_epoch = self.restore()
+        epoch_loss_list = []
+        epoch_l1_loss_list = []
+        epoch_l2_loss_list = []
+
+        for epoch in range(start_epoch, self.epochs):
+            print(f"Epoch {epoch}")
+            self.model.train()
+            loss_list_l1 = []
+            loss_list_l2 = []
+            loss_list = []
+            self.trainloader.dataset.precompute_indices()
+
+            for i, data in enumerate(tqdm(self.trainloader)):
+                if not self.trainloader.dataset.load_to_memory:
+                    (noisy_image, _, ds_idx, noisy_image_avg, noisy_image_std) = data
+                    noisy_image_avg = torch.reshape(noisy_image_avg, (-1, 1, 1, 1)).cuda()
+                    noisy_image_std = torch.reshape(noisy_image_std, (-1, 1, 1, 1)).cuda()
+                    noisy_image = (noisy_image - noisy_image_avg) / noisy_image_std
+                else:
+                    (noisy_image, _, ds_idx) = data
+                B, T, X, Y = noisy_image.shape
+                noisy_image = noisy_image.cuda()
+
+                noisy_image, _ = random_transform(noisy_image, None, self.rng, self.is_rotate)
+
+                noisy_target = torch.unsqueeze(noisy_image[:, int(T / 2), :, :], dim=1)
+
+                loss, l1_loss, l2_loss = self.train_batch(noisy_image, noisy_target)
+                loss_list.append(loss)
+                loss_list_l1.append(l1_loss)
+                loss_list_l2.append(l2_loss)
+            epoch_loss = np.mean(np.array(loss_list))
+            epoch_l1_loss = np.mean(np.array(loss_list_l1))
+            epoch_l2_loss = np.mean(np.array(loss_list_l2))
+            epoch_loss_list.append(epoch_loss)
+            epoch_l1_loss_list.append(epoch_l1_loss)
+            epoch_l2_loss_list.append(epoch_l2_loss)
+
+        return epoch_loss_list[-1], (epoch_loss_list, epoch_l1_loss_list, epoch_l2_loss_list), self.model.state_dict()
+
+
+def support_chkpt_trainer_fn(
+        model: torch.nn.Module,
+        dataloaders: Dict,
+        seed: int,
+        uid: Dict,
+        cb: Callable,
+        **config
+
+) -> Tuple[float,Any,Dict]:
+    trainer = SUPPORTChkptTrainer(model,dataloaders,seed,uid,config,callback=cb)
     out = trainer.train()
     return out

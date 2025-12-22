@@ -3,7 +3,10 @@ sys.path.append('../SUPPORT')
 import torch
 import torch.nn as nn
 
-from SUPPORT.model.convhole import ConvHole2D
+try:
+    from SUPPORT.model.convhole import ConvHole2D
+except:
+    from model.convhole import ConvHole2D
 from typing import Dict
 class SUPPORT(nn.Module):
     """

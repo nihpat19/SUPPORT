@@ -1,14 +1,15 @@
 import os
+import pdb
 import random
 import logging
 import time
 import numpy as np
 import torch
 import skimage.io as skio
-
+import json
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from src.utils.dataset import gen_train_dataloader, random_transform
+from src.utils.dataset import random_transform, gen_train_dataloader_pipeline
 from src.utils.util import parse_arguments
 from model.SUPPORT import SUPPORT
 
@@ -125,13 +126,15 @@ if __name__=="__main__":
     logging.basicConfig(level=logging.INFO, filename=opt.results_dir + "/logs/{}.log".format(opt.exp_name),\
         filemode="a", format="%(name)s - %(levelname)s - %(message)s")
     writer = SummaryWriter(opt.results_dir + "/tsboard/{}".format(opt.exp_name))
-
+    with open(opt.noisy_data[0], 'r') as f:
+        noisy_data_keys = json.load(f)
     #-----------
     # Dataset
     # ----------
-    dataloader_train = gen_train_dataloader(opt.patch_size, opt.patch_interval, opt.batch_size, \
-        opt.noisy_data, opt, is_zarr=opt.is_zarr)
-
+    #dataloader_train = gen_train_dataloader(opt.patch_size, opt.patch_interval, opt.batch_size, \
+    #    opt.noisy_data, opt, is_zarr=opt.is_zarr)
+    dataloader_train = gen_train_dataloader_pipeline(opt.patch_size,opt.patch_interval,opt.batch_size,
+                                                     noisy_data_keys, opt.is_zarr)
     # ----------
     # Model, Optimizers, and Loss
     # ----------
@@ -158,6 +161,7 @@ if __name__=="__main__":
     # Training & Validation
     # ----------
     for epoch in range(opt.epoch, opt.n_epochs):
+        #pdb.set_trace()
         dataloader_train.dataset.precompute_indices()
         loss_list, loss_list_l1, loss_list_l2 =\
             train(dataloader_train, model, optimizer, scaler, rng, writer, epoch, opt)
