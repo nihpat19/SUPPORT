@@ -5,7 +5,10 @@ import zarr
 import pdb
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader
-from SUPPORT.src.utils.util import get_coordinate
+try:
+    from SUPPORT.src.utils.util import get_coordinate
+except ModuleNotFoundError:
+    from util import get_coordinate
 import pipeline
 from pipeline.utils import galvo_corrections
 import tifffile
