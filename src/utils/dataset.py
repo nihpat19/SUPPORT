@@ -14,6 +14,8 @@ from pipeline.utils import galvo_corrections
 import tifffile
 import pipeline.experiment as experiment
 import pipeline.reso as reso
+import pipeline.meso as meso
+import pipeline.fuse as fuse
 import scanreader
 import json
 def random_transform(input, target, rng, is_rotate=True):
@@ -369,31 +371,38 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         noisy_scan = experiment.Scan & key
         noisy_data = noisy_scan.local_filenames_as_wildcard
         noisy_image = scanreader.read_scan(noisy_data)
-        channel = (reso.CorrectionChannel & key).fetch1('channel')
-
-        raster_correction_params = (reso.RasterCorrection & key).fetch1()
-        fill_fraction = (reso.ScanInfo & key).fetch1('fill_fraction')
-        motion_correction_params = (reso.MotionCorrection & key).fetch1()
-        field = motion_correction_params['field']
-
+        fuse_mc_keys = (fuse.MotionCorrection & key).fetch(as_dict=True)
         noisy_image_medianidx = int(noisy_image.shape[-1] // 2) - 1
-        median_slice_indices = np.arange(noisy_image_medianidx - 1000, noisy_image_medianidx + 1000, 1)
-        noisy_image = noisy_image[field-1,:,:,channel-1,median_slice_indices].astype(np.float32)
-        if raster_correction_params['raster_phase']>1e-7:
-            noisy_image = galvo_corrections.correct_raster(noisy_image,raster_phase=raster_correction_params['raster_phase'],
-                                                                       temporal_fill_fraction=fill_fraction)
+        median_slice_indices = np.arange(noisy_image_medianidx - 500, noisy_image_medianidx + 500, 1)
+        for field_key in fuse_mc_keys:
+            which_pipeline = fuse_mc_keys.mapping[field_key['pipe']]
 
-        median_slice_xshifts = motion_correction_params['x_shifts'][median_slice_indices]
-        median_slice_yshifts = motion_correction_params['y_shifts'][median_slice_indices]
-        noisy_image = galvo_corrections.correct_motion(noisy_image,median_slice_xshifts,median_slice_yshifts)
-        noisy_image = noisy_image.transpose(2, 0, 1)
-        noisy_image = torch.from_numpy(noisy_image).type(torch.FloatTensor)
-        print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
-        if len(noisy_image.shape) == 2:
-            noisy_image = noisy_image.unsqueeze(0)
 
-        T, _, _ = noisy_image.shape
-        noisy_images_train.append(noisy_image)
+            channel = (reso.CorrectionChannel & field_key).fetch1('channel') if field_key['pipe'] is 'reso' else \
+                (meso.CorrectionChannel & field_key).fetch1('channel')
+
+            raster_correction_params = (reso.RasterCorrection & field_key).fetch1()
+            fill_fraction = (reso.ScanInfo & field_key).fetch1('fill_fraction')
+            motion_correction_params = (which_pipeline[0] & field_key).fetch1()
+            field = motion_correction_params['field']
+
+
+            noisy_image_field = noisy_image[field-1,:,:,channel-1,median_slice_indices].astype(np.float32)
+            if raster_correction_params['raster_phase']>1e-7:
+                noisy_image_field = galvo_corrections.correct_raster(noisy_image_field,raster_phase=raster_correction_params['raster_phase'],
+                                                                           temporal_fill_fraction=fill_fraction)
+
+            median_slice_xshifts = motion_correction_params['x_shifts'][median_slice_indices]
+            median_slice_yshifts = motion_correction_params['y_shifts'][median_slice_indices]
+            noisy_image_field = galvo_corrections.correct_motion(noisy_image_field,median_slice_xshifts,median_slice_yshifts)
+            noisy_image_field = noisy_image_field.transpose(2, 0, 1)
+            noisy_image_field = torch.from_numpy(noisy_image_field).type(torch.FloatTensor)
+            print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
+            if len(noisy_image.shape) == 2:
+                noisy_image_field = noisy_image_field.unsqueeze(0)
+
+            #T, _, _ = noisy_image_field.shape
+            noisy_images_train.append(noisy_image_field)
         # else:
         #     noisy_image = zarr.open(noisy_data, mode='r')
         #     print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
