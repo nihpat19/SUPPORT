@@ -372,17 +372,19 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
         noisy_data = noisy_scan.local_filenames_as_wildcard
         noisy_image = scanreader.read_scan(noisy_data)
         fuse_mc_keys = (fuse.MotionCorrection & key).fetch(as_dict=True)
-        noisy_image_medianidx = int(noisy_image.shape[-1] // 2) - 1
+        noisy_image_medianidx = int(noisy_image.num_frames // 2) - 1
         median_slice_indices = np.arange(noisy_image_medianidx - 500, noisy_image_medianidx + 500, 1)
         for field_key in fuse_mc_keys:
-            which_pipeline = fuse_mc_keys.mapping[field_key['pipe']]
+            which_pipeline = (fuse.MotionCorrection & {}).mapping[field_key['pipe']]
 
 
-            channel = (reso.CorrectionChannel & field_key).fetch1('channel') if field_key['pipe'] is 'reso' else \
+            channel = (reso.CorrectionChannel & field_key).fetch1('channel') if field_key['pipe']=='reso' else \
                 (meso.CorrectionChannel & field_key).fetch1('channel')
 
-            raster_correction_params = (reso.RasterCorrection & field_key).fetch1()
-            fill_fraction = (reso.ScanInfo & field_key).fetch1('fill_fraction')
+            raster_correction_params = (reso.RasterCorrection & field_key).fetch1() if field_key['pipe']=='reso' else \
+                (meso.RasterCorrection & field_key).fetch1()
+            fill_fraction = (reso.ScanInfo & field_key).fetch1('fill_fraction') if field_key['pipe']=='reso' else \
+                (meso.ScanInfo & field_key).fetch1('fill_fraction')
             motion_correction_params = (which_pipeline[0] & field_key).fetch1()
             field = motion_correction_params['field']
 
@@ -397,8 +399,8 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
             noisy_image_field = galvo_corrections.correct_motion(noisy_image_field,median_slice_xshifts,median_slice_yshifts)
             noisy_image_field = noisy_image_field.transpose(2, 0, 1)
             noisy_image_field = torch.from_numpy(noisy_image_field).type(torch.FloatTensor)
-            print(f"Loaded {noisy_data} Shape : {noisy_image.shape}")
-            if len(noisy_image.shape) == 2:
+            print(f"Loaded {noisy_data}")
+            if len(noisy_image_field.shape) == 2:
                 noisy_image_field = noisy_image_field.unsqueeze(0)
 
             #T, _, _ = noisy_image_field.shape
@@ -419,7 +421,7 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
 
 
 
-def gen_train_dataloader_nnfabrik_pipeline_local(patch_size, patch_interval, batch_size, noisy_datapath, image_window_length, is_zarr=False):
+def gen_train_dataloader_nnfabrik_pipeline_local(patch_dim, patch_interval_dim, batch_size, noisy_datapath, image_window_length, is_zarr=False):
     """
     Generate dataloader for training
 
@@ -431,6 +433,8 @@ def gen_train_dataloader_nnfabrik_pipeline_local(patch_size, patch_interval, bat
     Returns:
         dataloader_train
     """
+    patch_size = [61,patch_dim,patch_dim]
+    patch_interval = [1,patch_interval_dim,patch_interval_dim]
     with open(noisy_datapath,'r') as f:
         noisy_data_keys = json.load(f)
     noisy_images_train = []
@@ -482,14 +486,14 @@ def gen_train_dataloader_nnfabrik_pipeline_local(patch_size, patch_interval, bat
 def get_nnfabrik_training_dataset(seed: int, **config):
     print(config)
     np.random.seed(seed)
-    patch_size = config.get("patch_size", [61, 128, 128])
-    patch_interval = config.get("patch_interval", [1,64,64])
+    patch_dim = config.get("patch_dim", 128)
+    patch_interval_dim = config.get("patch_interval_dim", 64)
     batch_size = config.get("batch_size", 64)
     dataset_paths = config.get("datasets")
     is_zarr = config.get("is_zarr", False)
     window_length = config.get("window_length",500)
     return {
-        "train" : gen_train_dataloader_nnfabrik_pipeline_local(patch_size,patch_interval,batch_size,dataset_paths,window_length, is_zarr)
+        "train" : gen_train_dataloader_nnfabrik_pipeline_local(patch_dim,patch_interval_dim,batch_size,dataset_paths,window_length, is_zarr)
     }
 
 
