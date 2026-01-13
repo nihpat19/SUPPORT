@@ -61,12 +61,12 @@ def validate(test_dataloader, model):
 
 if __name__ == '__main__':
     ########## Change it with your data ##############
-    data_file = "../single_cell_key2.json"
-    model_file = "../training_results/saved_models/pipeline_dataloading_testfull/model_499.pth"
-    output_file = "../testing_results/single_cell_notpartoftestingpipeline_differentmodel"
-    patch_size = [61, 16, 16]
-    patch_interval = [1, 8, 8]
-    batch_size = 3200    # lower it if memory exceeds.
+    data_file = "../jedi_astrocytes_testing_keys.json"
+    model_file = "./results/saved_models/JediAstrocytesTrain/model_499_batch_0.pth"
+    output_file = "../testing_results/jediastrocyte_testing_sz32intv16"
+    patch_size = [61, 32, 32]
+    patch_interval = [1, 16, 16]
+    batch_size = 1000    # lower it if memory exceeds.
     bs_size = 3    # modify if you changed bs_size when training.
     bp_mode = False
     ##################################################
@@ -75,44 +75,46 @@ if __name__ == '__main__':
             blind_conv_channels=64, one_by_one_channels=[32, 16], last_layer_channels=[64, 32, 16], bs_size=bs_size, bp=bp_mode).cuda()
 
     model.load_state_dict(torch.load(model_file))
-    demo_key = json.load(open(data_file, 'r'))
-    noisy_scan = experiment.Scan & demo_key
-    noisy_data = noisy_scan.local_filenames_as_wildcard
-    #noisy_image = scanreader.read_scan(noisy_data)
-    print(f"Testing scan {noisy_data}")
-    fuse_mc_keys = (fuse.MotionCorrection & demo_key).fetch(as_dict=True)
-    for field_key in fuse_mc_keys:
-        which_pipeline = (fuse.MotionCorrection & {}).mapping[field_key['pipe']]
+    demo_keys = json.load(open(data_file, 'r'))
+    for demo_key in demo_keys:
+        noisy_scan = experiment.Scan & demo_key
+        noisy_data = noisy_scan.local_filenames_as_wildcard
+        #noisy_image = scanreader.read_scan(noisy_data)
+        print(f"Testing scan {noisy_data}")
+        fuse_mc_keys = (fuse.MotionCorrection & demo_key).fetch(as_dict=True)
+        for field_key in fuse_mc_keys:
+            which_pipeline = (fuse.MotionCorrection & {}).mapping[field_key['pipe']]
 
-        channel = (reso.CorrectionChannel & field_key).fetch1('channel') if field_key['pipe'] == 'reso' else \
-            (meso.CorrectionChannel & field_key).fetch1('channel')
+            channel = (reso.CorrectionChannel & field_key).fetch1('channel') if field_key['pipe'] == 'reso' else \
+                (meso.CorrectionChannel & field_key).fetch1('channel')
 
-        raster_correction_params = (reso.RasterCorrection & field_key).fetch1() if field_key['pipe'] == 'reso' else \
-            (meso.RasterCorrection & field_key).fetch1()
-        fill_fraction = (reso.ScanInfo & field_key).fetch1('fill_fraction') if field_key['pipe'] == 'reso' else \
-            (meso.ScanInfo & field_key).fetch1('fill_fraction')
-        motion_correction_params = (which_pipeline[0] & field_key).fetch1()
-        field = motion_correction_params['field']
+            raster_correction_params = (reso.RasterCorrection & field_key).fetch1() if field_key['pipe'] == 'reso' else \
+                (meso.RasterCorrection & field_key).fetch1()
+            fill_fraction = (reso.ScanInfo & field_key).fetch1('fill_fraction') if field_key['pipe'] == 'reso' else \
+                (meso.ScanInfo & field_key).fetch1('fill_fraction')
+            motion_correction_params = (which_pipeline[0] & field_key).fetch1()
+            field = motion_correction_params['field']
 
-        noisy_image_field = scanreader.read_scan(noisy_data)[field - 1, :, :, channel - 1, :].astype(np.float32)
-        f"Loaded scan field {field}. Performing Raster and motion correction..."
-        if raster_correction_params['raster_phase'] > 1e-7:
-            noisy_image_field = galvo_corrections.correct_raster(noisy_image_field,
-                                                                 raster_phase=raster_correction_params['raster_phase'],
-                                                                 temporal_fill_fraction=fill_fraction)
+            noisy_image_field = scanreader.read_scan(noisy_data)[field - 1, :, :, channel - 1, :].astype(np.float32)
+            f"Loaded scan field {field}. Performing Raster and motion correction..."
+            if raster_correction_params['raster_phase'] > 1e-7:
+                noisy_image_field = galvo_corrections.correct_raster(noisy_image_field,
+                                                                     raster_phase=raster_correction_params['raster_phase'],
+                                                                     temporal_fill_fraction=fill_fraction)
 
-        xshifts = motion_correction_params['x_shifts']
-        yshifts = motion_correction_params['y_shifts']
-        noisy_image_field = galvo_corrections.correct_motion(noisy_image_field, xshifts,
-                                                             yshifts)
-        noisy_image_field = noisy_image_field.transpose(2, 0, 1)
-        noisy_image_field = torch.from_numpy(noisy_image_field).type(torch.FloatTensor)
-        testset = DatasetSUPPORT_test_stitch(noisy_image_field, patch_size=patch_size, \
-                                             patch_interval=patch_interval)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size)
-        denoised_stack = validate(testloader, model)
-        skio.imsave(f'{output_file}_field{field}.tif', denoised_stack[(model.in_channels - 1) // 2:-(model.in_channels - 1) // 2, :, :],
-                    metadata={'axes': 'TYX'})
+            xshifts = motion_correction_params['x_shifts']
+            yshifts = motion_correction_params['y_shifts']
+            noisy_image_field = galvo_corrections.correct_motion(noisy_image_field, xshifts,
+                                                                 yshifts)
+            noisy_image_field = noisy_image_field.transpose(2, 0, 1)
+            noisy_image_field = torch.from_numpy(noisy_image_field).type(torch.FloatTensor)
+            testset = DatasetSUPPORT_test_stitch(noisy_image_field, patch_size=patch_size, \
+                                                 patch_interval=patch_interval)
+            testloader = torch.utils.data.DataLoader(testset, batch_size=batch_size)
+            denoised_stack = validate(testloader, model)
+            skio.imsave(f'{output_file}_field{field}.tif', denoised_stack[(model.in_channels - 1) // 2:-(model.in_channels - 1) // 2, :, :],
+                        metadata={'axes': 'TYX'})
+            del(noisy_image_field)
 
     # channel = (reso.CorrectionChannel & demo_key).fetch1('channel')
     #

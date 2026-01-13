@@ -12,7 +12,7 @@ except ModuleNotFoundError:
 import pipeline
 from pipeline.utils import galvo_corrections
 import tifffile
-import pipeline.experiment as experiment
+from pipeline.experiment import Scan
 import pipeline.reso as reso
 import pipeline.meso as meso
 import pipeline.fuse as fuse
@@ -368,7 +368,7 @@ def gen_train_dataloader_pipeline(patch_size, patch_interval, batch_size, noisy_
 
     for key in noisy_data_keys:
         #if not is_zarr:
-        noisy_scan = experiment.Scan & key
+        noisy_scan = Scan & key
         noisy_data = noisy_scan.local_filenames_as_wildcard
         noisy_image = scanreader.read_scan(noisy_data)
         fuse_mc_keys = (fuse.MotionCorrection & key).fetch(as_dict=True)
@@ -441,7 +441,7 @@ def gen_train_dataloader_nnfabrik_pipeline_local(patch_dim, patch_interval_dim, 
 
     for key in tqdm(noisy_data_keys):
         #if not is_zarr:
-        noisy_scan = experiment.Scan & key
+        noisy_scan = Scan & key
         noisy_data = noisy_scan.local_filenames_as_wildcard
         noisy_image = scanreader.read_scan(noisy_data)
         channel = (reso.CorrectionChannel & key).fetch1('channel')

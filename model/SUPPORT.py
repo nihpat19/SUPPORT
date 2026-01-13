@@ -346,8 +346,9 @@ def support_model_fn(dataloaders: Dict, seed: int, **config) -> torch.nn.Module:
     #first_input, first_output = next(iter(dataloaders["train"]))
     #n_dim = np.prod(first_input.shape[1:])
     torch.manual_seed(seed)
+    unet_channels = [16, 32, 64, 128, 256]
     model = SUPPORT(in_channels=61,
-                    mid_channels=config.get("unet_channels", [64, 128, 256, 512, 1024]),
+                    mid_channels=[channel_count*config.get("unet_channel_scaling_factor", 4) for channel_count in unet_channels],
                     depth=5,
                     blind_conv_channels=64,
                     one_by_one_channels=[32,16],
